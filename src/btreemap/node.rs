@@ -5,8 +5,11 @@ use crate::{
     types::{Address, Bytes},
     write, write_struct, write_u32, Memory,
 };
-use std::borrow::{Borrow, Cow};
 use std::cell::OnceCell;
+use std::{
+    borrow::{Borrow, Cow},
+    fmt::Display,
+};
 
 mod io;
 #[cfg(test)]
@@ -37,6 +40,12 @@ pub enum NodeType {
 }
 
 pub type Entry<K> = (K, Vec<u8>);
+pub struct EntryExtra<K> {
+    pub key: K,
+    pub value: Vec<u8>,
+    pub offset: u64,
+    pub size: u32,
+}
 pub type EntryRef<'a, K> = (&'a K, &'a [u8]);
 
 type LazyEntry<K> = (LazyKey<K>, LazyValue);
@@ -55,6 +64,7 @@ pub struct Node<K: Storable + Ord + Clone> {
     // List of tuples consisting of a key and the encoded value.
     // INVARIANT: the list is sorted by key.
     entries: Vec<LazyEntry<K>>,
+    entries_pos: Vec<(u64, u32)>,
     // For the key at position I, children[I] points to the left
     // child of this key and children[I + 1] points to the right child.
     children: Vec<Address>,
@@ -319,12 +329,15 @@ impl<K: Storable + Ord + Clone> Node<K> {
     }
 
     /// Returns the entry at the specified index while consuming this node.
-    pub fn extract_entry_at<M: Memory>(&mut self, idx: usize, memory: &M) -> Entry<K> {
+    pub fn extract_entry_at<M: Memory>(&mut self, idx: usize, memory: &M) -> EntryExtra<K> {
         let (key, value) = self.entries.swap_remove(idx);
-        (
-            self.extract_key(key, memory),
-            self.extract_value(value, memory),
-        )
+        let (off, size) = self.entries_pos[idx];
+        EntryExtra {
+            key: self.extract_key(key, memory),
+            value: self.extract_value(value, memory),
+            offset: off,
+            size,
+        }
     }
 
     /// Removes the entry at the specified index.

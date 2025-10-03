@@ -49,6 +49,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
             address,
             node_type,
             entries: vec![],
+            entries_pos: vec![],
             children: vec![],
             version: Version::V1(page_size),
             overflows: Vec::with_capacity(0),
@@ -68,6 +69,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
 
         // Load the entries.
         let mut entries = Vec::with_capacity(header.num_entries as usize);
+        let mut entries_pos = Vec::with_capacity(header.num_entries as usize);
         let mut offset = NodeHeader::size();
         for _ in 0..header.num_entries {
             let size = read_u32(memory, address + offset);
@@ -79,6 +81,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
             offset += U32_SIZE + Bytes::from(max_value_size);
 
             entries.push((key, value));
+            entries_pos.push(((address + offset + U32_SIZE).get(), size));
         }
 
         // Load children if this is an internal node.
@@ -98,6 +101,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
         Self {
             address,
             entries,
+            entries_pos,
             children,
             node_type: match header.node_type {
                 LEAF_NODE_TYPE => NodeType::Leaf,

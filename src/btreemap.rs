@@ -261,6 +261,16 @@ struct BTreeHeader {
     // Reserved bytes for future extensions
 }
 
+#[derive(PartialEq, Debug)]
+pub struct Value<V>
+where
+    V: Storable,
+{
+    pub value: V,
+    pub offset: u64,
+    pub size: u32,
+}
+
 impl<K, V, M> BTreeMap<K, V, M>
 where
     K: Storable + Ord + Clone,
@@ -654,10 +664,26 @@ where
             return None;
         }
         self.traverse(self.root_addr, key, |node, idx| {
-            node.extract_entry_at(idx, self.memory()).1 // Extract value.
+            node.extract_entry_at(idx, self.memory()).value // Extract value.
         })
         .map(Cow::Owned)
         .map(V::from_bytes)
+    }
+
+    pub fn get_extra(&self, key: &K) -> Option<Value<V>> {
+        if self.root_addr == NULL {
+            return None;
+        }
+        let entry = self.traverse(self.root_addr, key, |node, idx| {
+            node.extract_entry_at(idx, self.memory()) // Extract value.
+        })?;
+
+        let data = Cow::Owned(entry.value);
+        Some(Value {
+            value: V::from_bytes(data),
+            offset: entry.offset,
+            size: entry.size,
+        })
     }
 
     /// Returns true if the key exists.
@@ -738,7 +764,7 @@ where
         Some((k, V::from_bytes(Cow::Owned(encoded_v))))
     }
 
-    fn memory(&self) -> &M {
+    pub fn memory(&self) -> &M {
         self.allocator.memory()
     }
 

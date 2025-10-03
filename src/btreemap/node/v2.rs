@@ -99,6 +99,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
             node_type,
             version: Version::V2(page_size),
             entries: vec![],
+            entries_pos: vec![],
             children: vec![],
             overflows: Vec::with_capacity(0),
         }
@@ -164,6 +165,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
         // Load the keys (eagerly if small).
         const EAGER_LOAD_KEY_SIZE_THRESHOLD: u32 = 16;
         let mut entries = Vec::with_capacity(num_entries);
+        let mut entries_pos = Vec::with_capacity(num_entries);
         let mut buf = vec![];
 
         for _ in 0..num_entries {
@@ -200,12 +202,14 @@ impl<K: Storable + Ord + Clone> Node<K> {
             // Load the values lazily.
             let value_size = read_u32(&reader, offset);
             *value = LazyValue::by_ref(Bytes::from(offset.get()), value_size);
+            entries_pos.push((address.get() + offset.get() + U32_SIZE.get(), value_size));
             offset += U32_SIZE + Bytes::from(value_size as u64);
         }
 
         Self {
             address,
             entries,
+            entries_pos,
             children,
             node_type,
             version: Version::V2(page_size),
