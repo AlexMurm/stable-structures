@@ -670,20 +670,28 @@ where
         .map(V::from_bytes)
     }
 
-    pub fn get_extra(&self, key: &K) -> Option<Value<V>> {
+    /// Returns the value (old value) for the given key, if it exists and write result of callback function (new value).
+    pub fn get_with_write_callback<C>(&self, key: &K, callback: C) -> Result<Option<V>, String>
+    where
+        C: Fn(&V) -> Result<V, String>,
+    {
         if self.root_addr == NULL {
-            return None;
+            return Ok(None);
         }
-        let entry = self.traverse(self.root_addr, key, |node, idx| {
-            node.extract_entry_at(idx, self.memory()) // Extract value.
-        })?;
-
-        let data = Cow::Owned(entry.value);
-        Some(Value {
-            value: V::from_bytes(data),
-            offset: entry.offset,
-            size: entry.size,
+        self.traverse(self.root_addr, key, |node, idx| {
+            let old = node.extract_entry_at(idx, self.memory());
+            let old_v = V::from_bytes(Cow::Owned(old.value.clone()));
+            let new_value = callback(&old_v)?.into_bytes();
+            if new_value != old.value {
+                if new_value.len() != old.value.len() {
+                    return Err("invalid callback result".to_string());
+                }
+                self.memory().write(old.offset, &new_value);
+                let _ = node.swap_value(idx, new_value, self.memory());
+            }
+            Ok(old_v)
         })
+        .transpose()
     }
 
     /// Returns true if the key exists.
@@ -764,7 +772,7 @@ where
         Some((k, V::from_bytes(Cow::Owned(encoded_v))))
     }
 
-    pub fn memory(&self) -> &M {
+    fn memory(&self) -> &M {
         self.allocator.memory()
     }
 
