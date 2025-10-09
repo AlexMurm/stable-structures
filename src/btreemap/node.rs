@@ -5,11 +5,8 @@ use crate::{
     types::{Address, Bytes},
     write, write_struct, write_u32, Memory,
 };
+use std::borrow::{Borrow, Cow};
 use std::cell::OnceCell;
-use std::{
-    borrow::{Borrow, Cow},
-    fmt::Display,
-};
 
 mod io;
 #[cfg(test)]
@@ -21,7 +18,7 @@ use io::NodeReader;
 
 // The minimum degree to use in the btree.
 // This constant is taken from Rust's std implementation of BTreeMap.
-const B: usize = 6;
+const B: usize = 20;
 // The maximum number of entries per node.
 const CAPACITY: usize = 2 * B - 1;
 const LAYOUT_VERSION_1: u8 = 1;
@@ -40,6 +37,7 @@ pub enum NodeType {
 }
 
 pub type Entry<K> = (K, Vec<u8>);
+#[allow(dead_code)]
 pub struct EntryExtra<K> {
     pub key: K,
     pub value: Vec<u8>,
@@ -78,7 +76,7 @@ pub struct Node<K: Storable + Ord + Clone> {
 
 impl<K: Storable + Ord + Clone> Node<K> {
     /// Loads a node from memory at the given address.
-    pub fn load<M: Memory>(address: Address, page_size: PageSize, memory: &M) -> Self {
+    pub fn load<M: Memory, V: Storable>(address: Address, page_size: PageSize, memory: &M) -> Self {
         // Load the header to determine which version the node is, then load the node accordingly.
         let header: NodeHeader = read_struct(address, memory);
         assert_eq!(&header.magic, MAGIC, "Bad magic.");
@@ -92,7 +90,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
                     unreachable!("Tried to load a V1 node without a derived PageSize.")
                 }
             },
-            LAYOUT_VERSION_2 => Self::load_v2(address, page_size, header, memory),
+            LAYOUT_VERSION_2 => Self::load_v2::<_, V>(address, page_size, header, memory),
             unknown_version => unreachable!("Unsupported version {unknown_version}."),
         }
     }
@@ -115,7 +113,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
     }
 
     /// Returns the entry with the max key in the subtree.
-    pub fn get_max<M: Memory>(&self, memory: &M) -> Entry<K> {
+    pub fn get_max<M: Memory, V: Storable>(&self, memory: &M) -> Entry<K> {
         match self.node_type {
             NodeType::Leaf => {
                 let last_entry = self.entries.last().expect("A node can never be empty");
@@ -125,7 +123,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
                 )
             }
             NodeType::Internal => {
-                let last_child = Self::load(
+                let last_child = Self::load::<_, V>(
                     *self
                         .children
                         .last()
@@ -133,13 +131,13 @@ impl<K: Storable + Ord + Clone> Node<K> {
                     self.version.page_size(),
                     memory,
                 );
-                last_child.get_max(memory)
+                last_child.get_max::<_, V>(memory)
             }
         }
     }
 
     /// Returns the entry with min key in the subtree.
-    pub fn get_min<M: Memory>(&self, memory: &M) -> Entry<K> {
+    pub fn get_min<M: Memory, V: Storable>(&self, memory: &M) -> Entry<K> {
         match self.node_type {
             NodeType::Leaf => {
                 // NOTE: a node can never be empty, so this access is safe.
@@ -147,13 +145,13 @@ impl<K: Storable + Ord + Clone> Node<K> {
                 (entry.0.clone(), entry.1.to_vec())
             }
             NodeType::Internal => {
-                let first_child = Self::load(
+                let first_child = Self::load::<_, V>(
                     // NOTE: an internal node must have children, so this access is safe.
                     self.children[0],
                     self.version.page_size(),
                     memory,
                 );
-                first_child.get_min(memory)
+                first_child.get_min::<_, V>(memory)
             }
         }
     }

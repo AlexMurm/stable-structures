@@ -757,7 +757,7 @@ where
             return None;
         }
         let root = self.load_node(self.root_addr);
-        let (k, encoded_v) = root.get_min(self.memory());
+        let (k, encoded_v) = root.get_min::<_, V>(self.memory());
         Some((k, V::from_bytes(Cow::Owned(encoded_v))))
     }
 
@@ -768,7 +768,7 @@ where
             return None;
         }
         let root = self.load_node(self.root_addr);
-        let (k, encoded_v) = root.get_max(self.memory());
+        let (k, encoded_v) = root.get_max::<_, V>(self.memory());
         Some((k, V::from_bytes(Cow::Owned(encoded_v))))
     }
 
@@ -799,7 +799,7 @@ where
         }
 
         let root = self.load_node(self.root_addr);
-        let (max_key, _) = root.get_max(self.memory());
+        let (max_key, _) = root.get_max::<_, V>(self.memory());
         self.remove_helper(root, &max_key)
             .map(|v| (max_key, V::from_bytes(Cow::Owned(v))))
     }
@@ -811,7 +811,7 @@ where
         }
 
         let root = self.load_node(self.root_addr);
-        let (min_key, _) = root.get_min(self.memory());
+        let (min_key, _) = root.get_min::<_, V>(self.memory());
         self.remove_helper(root, &min_key)
             .map(|v| (min_key, V::from_bytes(Cow::Owned(v))))
     }
@@ -883,7 +883,7 @@ where
 
                             // Recursively delete the predecessor.
                             // TODO(EXC-1034): Do this in a single pass.
-                            let predecessor = left_child.get_max(self.memory());
+                            let predecessor = left_child.get_max::<_, V>(self.memory());
                             self.remove_helper(left_child, &predecessor.0)?;
 
                             // Replace the `key` with its predecessor.
@@ -918,7 +918,7 @@ where
 
                             // Recursively delete the successor.
                             // TODO(EXC-1034): Do this in a single pass.
-                            let successor = right_child.get_min(self.memory());
+                            let successor = right_child.get_min::<_, V>(self.memory());
                             self.remove_helper(right_child, &successor.0)?;
 
                             // Replace the `key` with its successor.
@@ -1328,7 +1328,7 @@ where
     /// Loads a node from memory.
     #[inline]
     fn load_node(&self, address: Address) -> Node<K> {
-        Node::load(address, self.version.page_size(), self.memory())
+        Node::load::<_, V>(address, self.version.page_size(), self.memory())
     }
 
     /// Saves the node to memory.

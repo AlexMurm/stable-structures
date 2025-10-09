@@ -106,7 +106,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
     }
 
     /// Loads a v2 node from memory at the given address.
-    pub(super) fn load_v2<M: Memory>(
+    pub(super) fn load_v2<M: Memory, V: Storable>(
         address: Address,
         page_size: PageSize,
         header: NodeHeader,
@@ -168,39 +168,66 @@ impl<K: Storable + Ord + Clone> Node<K> {
         let mut entries_pos = Vec::with_capacity(num_entries);
         let mut buf = vec![];
 
-        for _ in 0..num_entries {
-            let key_offset = Bytes::from(offset.get());
+        if K::BOUND.is_fixed_size() {
+            let key_size = K::BOUND.max_size();
+            let step = key_size as usize;
 
-            // Get key size.
-            let key_size = if K::BOUND.is_fixed_size() {
-                K::BOUND.max_size()
-            } else {
-                let size = read_u32(&reader, offset);
+            read_to_vec(
+                &reader,
+                Address::from(offset.get()),
+                &mut buf,
+                num_entries * step,
+            );
+
+            for i in 0..num_entries {
+                let key_offset = Bytes::from(offset.get());
+
+                // Eager-load small keys, defer large ones.
+                let key = if key_size <= EAGER_LOAD_KEY_SIZE_THRESHOLD {
+                    LazyKey::by_value(K::from_bytes(Cow::Borrowed(
+                        buf.get(i * step..(i + 1) * step).unwrap(),
+                    )))
+                } else {
+                    LazyKey::by_ref(key_offset, key_size)
+                };
+
+                offset += Bytes::from(key_size);
+                entries.push((key, LazyValue::by_ref(Bytes::from(0_u64), 0)));
+            }
+        } else {
+            for _ in 0..num_entries {
+                let key_offset = Bytes::from(offset.get());
+
+                // Get key size.
+                let key_size = read_u32(&reader, offset);
                 offset += U32_SIZE;
-                size
-            };
 
-            // Eager-load small keys, defer large ones.
-            let key = if key_size <= EAGER_LOAD_KEY_SIZE_THRESHOLD {
-                read_to_vec(
-                    &reader,
-                    Address::from(offset.get()),
-                    &mut buf,
-                    key_size as usize,
-                );
-                LazyKey::by_value(K::from_bytes(Cow::Borrowed(&buf)))
-            } else {
-                LazyKey::by_ref(key_offset, key_size)
-            };
+                // Eager-load small keys, defer large ones.
+                let key = if key_size <= EAGER_LOAD_KEY_SIZE_THRESHOLD {
+                    read_to_vec(
+                        &reader,
+                        Address::from(offset.get()),
+                        &mut buf,
+                        key_size as usize,
+                    );
+                    LazyKey::by_value(K::from_bytes(Cow::Borrowed(&buf)))
+                } else {
+                    LazyKey::by_ref(key_offset, key_size)
+                };
 
-            offset += Bytes::from(key_size);
-            entries.push((key, LazyValue::by_ref(Bytes::from(0_u64), 0)));
+                offset += Bytes::from(key_size);
+                entries.push((key, LazyValue::by_ref(Bytes::from(0_u64), 0)));
+            }
         }
 
         // Load the values
         for (_key, value) in entries.iter_mut() {
             // Load the values lazily.
-            let value_size = read_u32(&reader, offset);
+            let value_size = if !V::BOUND.is_fixed_size() {
+                read_u32(&reader, offset)
+            } else {
+                V::BOUND.max_size()
+            };
             *value = LazyValue::by_ref(Bytes::from(offset.get()), value_size);
             entries_pos.push((address.get() + offset.get() + U32_SIZE.get(), value_size));
             offset += U32_SIZE + Bytes::from(value_size as u64);
