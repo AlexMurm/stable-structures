@@ -347,7 +347,7 @@ where
                 },
             ) => {
                 // Get the maximum possible node size.
-                let max_node_size = Node::<K>::max_size(max_key_size, max_value_size).get();
+                let max_node_size = Node::<K, V>::max_size(max_key_size, max_value_size).get();
 
                 // A node can have at most 11 entries, and an analysis has shown that ~70% of all
                 // nodes have <= 8 entries. We can therefore use a page size that's 8/11 the
@@ -388,7 +388,7 @@ where
             allocator: Allocator::new(
                 memory,
                 Address::from(ALLOCATOR_OFFSET as u64),
-                Node::<K>::max_size(max_key_size, max_value_size),
+                Node::<K, V>::max_size(max_key_size, max_value_size),
             ),
             version: Version::V1(DerivedPageSize {
                 max_key_size,
@@ -559,7 +559,7 @@ where
     }
 
     /// Inserts an entry into a node that is *not full*.
-    fn insert_nonfull(&mut self, mut node: Node<K>, key: K, value: Vec<u8>) -> Option<Vec<u8>> {
+    fn insert_nonfull(&mut self, mut node: Node<K, V>, key: K, value: Vec<u8>) -> Option<Vec<u8>> {
         // We're guaranteed by the caller that the provided node is not full.
         assert!(!node.is_full());
 
@@ -634,7 +634,7 @@ where
     ///                [ N  O  P  Q  R ]   [ T  U  V  W  X ]
     /// ```
     ///
-    fn split_child(&mut self, node: &mut Node<K>, full_child_idx: usize) {
+    fn split_child(&mut self, node: &mut Node<K, V>, full_child_idx: usize) {
         // The node must not be full.
         assert!(!node.is_full());
 
@@ -703,7 +703,7 @@ where
     /// Recursively traverses from `node_addr`, invoking `f` if `key` is found. Stops at a leaf if not.
     fn traverse<F, R>(&self, node_addr: Address, key: &K, f: F) -> Option<R>
     where
-        F: Fn(&mut Node<K>, usize) -> R,
+        F: Fn(&mut Node<K, V>, usize) -> R,
     {
         let mut node = self.load_node(node_addr);
         // Look for the key in the current node.
@@ -757,7 +757,7 @@ where
             return None;
         }
         let root = self.load_node(self.root_addr);
-        let (k, encoded_v) = root.get_min::<_, V>(self.memory());
+        let (k, encoded_v) = root.get_min(self.memory());
         Some((k, V::from_bytes(Cow::Owned(encoded_v))))
     }
 
@@ -768,7 +768,7 @@ where
             return None;
         }
         let root = self.load_node(self.root_addr);
-        let (k, encoded_v) = root.get_max::<_, V>(self.memory());
+        let (k, encoded_v) = root.get_max(self.memory());
         Some((k, V::from_bytes(Cow::Owned(encoded_v))))
     }
 
@@ -799,7 +799,7 @@ where
         }
 
         let root = self.load_node(self.root_addr);
-        let (max_key, _) = root.get_max::<_, V>(self.memory());
+        let (max_key, _) = root.get_max(self.memory());
         self.remove_helper(root, &max_key)
             .map(|v| (max_key, V::from_bytes(Cow::Owned(v))))
     }
@@ -811,13 +811,13 @@ where
         }
 
         let root = self.load_node(self.root_addr);
-        let (min_key, _) = root.get_min::<_, V>(self.memory());
+        let (min_key, _) = root.get_min(self.memory());
         self.remove_helper(root, &min_key)
             .map(|v| (min_key, V::from_bytes(Cow::Owned(v))))
     }
 
     /// A helper method for recursively removing a key from the B-tree.
-    fn remove_helper(&mut self, mut node: Node<K>, key: &K) -> Option<Vec<u8>> {
+    fn remove_helper(&mut self, mut node: Node<K, V>, key: &K) -> Option<Vec<u8>> {
         if node.address() != self.root_addr {
             // We're guaranteed that whenever this method is called an entry can be
             // removed from the node without it needing to be merged into a sibling.
@@ -883,7 +883,7 @@ where
 
                             // Recursively delete the predecessor.
                             // TODO(EXC-1034): Do this in a single pass.
-                            let predecessor = left_child.get_max::<_, V>(self.memory());
+                            let predecessor = left_child.get_max(self.memory());
                             self.remove_helper(left_child, &predecessor.0)?;
 
                             // Replace the `key` with its predecessor.
@@ -918,7 +918,7 @@ where
 
                             // Recursively delete the successor.
                             // TODO(EXC-1034): Do this in a single pass.
-                            let successor = right_child.get_min::<_, V>(self.memory());
+                            let successor = right_child.get_min(self.memory());
                             self.remove_helper(right_child, &successor.0)?;
 
                             // Replace the `key` with its successor.
@@ -1306,13 +1306,13 @@ where
     /// Output:
     ///   [1, 2, 3, 4, 5, 6, 7] (stored in the `into` node)
     ///   `source` is deallocated.
-    fn merge(&mut self, source: Node<K>, mut into: Node<K>, median: Entry<K>) -> Node<K> {
+    fn merge(&mut self, source: Node<K, V>, mut into: Node<K, V>, median: Entry<K>) -> Node<K, V> {
         into.merge(source, median, &mut self.allocator);
         into
     }
 
     /// Allocates a new node of the given type.
-    fn allocate_node(&mut self, node_type: NodeType) -> Node<K> {
+    fn allocate_node(&mut self, node_type: NodeType) -> Node<K, V> {
         match self.version {
             Version::V1(page_size) => Node::new_v1(self.allocator.allocate(), node_type, page_size),
             Version::V2(page_size) => Node::new_v2(self.allocator.allocate(), node_type, page_size),
@@ -1321,24 +1321,24 @@ where
 
     /// Deallocates a node.
     #[inline]
-    fn deallocate_node(&mut self, node: Node<K>) {
+    fn deallocate_node(&mut self, node: Node<K, V>) {
         node.deallocate(self.allocator_mut());
     }
 
     /// Loads a node from memory.
     #[inline]
-    fn load_node(&self, address: Address) -> Node<K> {
-        Node::load::<_, V>(address, self.version.page_size(), self.memory())
+    fn load_node(&self, address: Address) -> Node<K, V> {
+        Node::load(address, self.version.page_size(), self.memory())
     }
 
     /// Saves the node to memory.
     #[inline]
-    fn save_node(&mut self, node: &mut Node<K>) {
+    fn save_node(&mut self, node: &mut Node<K, V>) {
         node.save(self.allocator_mut());
     }
 
     /// Replaces the value at `idx` in the node, saves the node, and returns the old value.
-    fn update_value(&mut self, node: &mut Node<K>, idx: usize, new_value: Vec<u8>) -> Vec<u8> {
+    fn update_value(&mut self, node: &mut Node<K, V>, idx: usize, new_value: Vec<u8>) -> Vec<u8> {
         let old_value = node.swap_value(idx, new_value, self.memory());
         self.save_node(node);
         old_value

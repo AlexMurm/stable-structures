@@ -8,9 +8,9 @@ use std::ops::{Bound, RangeBounds};
 use std::rc::Rc;
 
 /// An indicator of the current position in the map.
-pub(crate) enum Cursor<K: Storable + Ord + Clone> {
+pub(crate) enum Cursor<K: Storable + Ord + Clone, V: Storable> {
     Address(Address),
-    Node { node: Rc<Node<K>>, next: Index },
+    Node { node: Rc<Node<K, V>>, next: Index },
 }
 
 /// An index into a node's child or entry.
@@ -37,8 +37,8 @@ where
     backward_cursors_initialized: bool,
 
     // Stacks of cursors indicating the current iteration positions in the tree.
-    forward_cursors: Vec<Cursor<K>>,
-    backward_cursors: Vec<Cursor<K>>,
+    forward_cursors: Vec<Cursor<K, V>>,
+    backward_cursors: Vec<Cursor<K, V>>,
 
     // The range of keys we want to traverse.
     range: (Bound<K>, Bound<K>),
@@ -276,7 +276,7 @@ where
 
     // Iterates to find the next element in the requested range.
     // If it exists, `map` is applied to that element and the result is returned.
-    fn next_map<T, F: Fn(&Rc<Node<K>>, usize) -> T>(&mut self, map: F) -> Option<T> {
+    fn next_map<T, F: Fn(&Rc<Node<K, V>>, usize) -> T>(&mut self, map: F) -> Option<T> {
         if !self.forward_cursors_initialized {
             self.initialize_forward_cursors();
         }
@@ -356,7 +356,7 @@ where
 
     // Iterates to find the next back element in the requested range.
     // If it exists, `map` is applied to that element and the result is returned.
-    fn next_back_map<T, F: Fn(&Rc<Node<K>>, usize) -> T>(&mut self, map: F) -> Option<T> {
+    fn next_back_map<T, F: Fn(&Rc<Node<K, V>>, usize) -> T>(&mut self, map: F) -> Option<T> {
         if !self.backward_cursors_initialized {
             self.initialize_backward_cursors();
         }
@@ -457,7 +457,7 @@ where
     V: Storable,
     M: Memory,
 {
-    node: Rc<Node<K>>,
+    node: Rc<Node<K, V>>,
     entry_idx: usize,
     map: &'a BTreeMap<K, V, M>,
 }

@@ -57,7 +57,7 @@ type LazyEntry<K> = (LazyKey<K>, LazyValue);
 ///
 /// See `v1.rs` and `v2.rs` for more details.
 #[derive(Debug)]
-pub struct Node<K: Storable + Ord + Clone> {
+pub struct Node<K: Storable + Ord + Clone, V: Storable> {
     address: Address,
     // List of tuples consisting of a key and the encoded value.
     // INVARIANT: the list is sorted by key.
@@ -72,11 +72,13 @@ pub struct Node<K: Storable + Ord + Clone> {
     // The address of the overflow page.
     // In V2, a node can span multiple pages if it exceeds a certain size.
     overflows: Vec<Address>,
+
+    value: std::marker::PhantomData<V>
 }
 
-impl<K: Storable + Ord + Clone> Node<K> {
+impl<K: Storable + Ord + Clone, V: Storable> Node<K, V> {
     /// Loads a node from memory at the given address.
-    pub fn load<M: Memory, V: Storable>(address: Address, page_size: PageSize, memory: &M) -> Self {
+    pub fn load<M: Memory>(address: Address, page_size: PageSize, memory: &M) -> Self {
         // Load the header to determine which version the node is, then load the node accordingly.
         let header: NodeHeader = read_struct(address, memory);
         assert_eq!(&header.magic, MAGIC, "Bad magic.");
@@ -90,7 +92,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
                     unreachable!("Tried to load a V1 node without a derived PageSize.")
                 }
             },
-            LAYOUT_VERSION_2 => Self::load_v2::<_, V>(address, page_size, header, memory),
+            LAYOUT_VERSION_2 => Self::load_v2(address, page_size, header, memory),
             unknown_version => unreachable!("Unsupported version {unknown_version}."),
         }
     }
@@ -113,7 +115,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
     }
 
     /// Returns the entry with the max key in the subtree.
-    pub fn get_max<M: Memory, V: Storable>(&self, memory: &M) -> Entry<K> {
+    pub fn get_max<M: Memory>(&self, memory: &M) -> Entry<K> {
         match self.node_type {
             NodeType::Leaf => {
                 let last_entry = self.entries.last().expect("A node can never be empty");
@@ -123,7 +125,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
                 )
             }
             NodeType::Internal => {
-                let last_child = Self::load::<_, V>(
+                let last_child = Self::load(
                     *self
                         .children
                         .last()
@@ -131,13 +133,13 @@ impl<K: Storable + Ord + Clone> Node<K> {
                     self.version.page_size(),
                     memory,
                 );
-                last_child.get_max::<_, V>(memory)
+                last_child.get_max(memory)
             }
         }
     }
 
     /// Returns the entry with min key in the subtree.
-    pub fn get_min<M: Memory, V: Storable>(&self, memory: &M) -> Entry<K> {
+    pub fn get_min<M: Memory>(&self, memory: &M) -> Entry<K> {
         match self.node_type {
             NodeType::Leaf => {
                 // NOTE: a node can never be empty, so this access is safe.
@@ -145,13 +147,13 @@ impl<K: Storable + Ord + Clone> Node<K> {
                 (entry.0.clone(), entry.1.to_vec())
             }
             NodeType::Internal => {
-                let first_child = Self::load::<_, V>(
+                let first_child = Self::load(
                     // NOTE: an internal node must have children, so this access is safe.
                     self.children[0],
                     self.version.page_size(),
                     memory,
                 );
-                first_child.get_min::<_, V>(memory)
+                first_child.get_min(memory)
             }
         }
     }
@@ -381,7 +383,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
     ///      order.
     pub fn merge<M: Memory>(
         &mut self,
-        mut source: Node<K>,
+        mut source: Node<K, V>,
         median: Entry<K>,
         allocator: &mut Allocator<M>,
     ) {
@@ -418,7 +420,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
     ///
     /// POSTCONDITION:
     ///   * `b` is empty.
-    fn append<M: Memory>(a: &mut Node<K>, b: &mut Node<K>, median: Entry<K>, memory: &M) {
+    fn append<M: Memory>(a: &mut Node<K, V>, b: &mut Node<K, V>, median: Entry<K>, memory: &M) {
         // Assert preconditions.
         let a_len = a.entries_len();
         assert_eq!(a.node_type(), b.node_type());
@@ -493,7 +495,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
     }
 
     /// Moves elements from own node to a sibling node and returns the median element.
-    pub fn split<M: Memory>(&mut self, sibling: &mut Node<K>, memory: &M) -> Entry<K> {
+    pub fn split<M: Memory>(&mut self, sibling: &mut Node<K, V>, memory: &M) -> Entry<K> {
         debug_assert!(self.is_full());
 
         // Load the entries that will be moved out of the node and into the new sibling.

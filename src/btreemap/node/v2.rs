@@ -71,6 +71,8 @@
 //! node by the BTreeMap Allocator, and has no connection with OS memory pages or
 //! Wasm pages.
 
+use std::marker::PhantomData;
+
 use super::*;
 use crate::btreemap::Allocator;
 use crate::{btreemap::node::io::NodeWriter, types::NULL};
@@ -89,9 +91,9 @@ pub(super) const PAGE_OVERFLOW_DATA_OFFSET: Bytes = Bytes::new(11);
 // addresses (88 bytes). We round that up to 128 to get a nice binary number.
 const MINIMUM_PAGE_SIZE: u32 = 128;
 
-impl<K: Storable + Ord + Clone> Node<K> {
+impl<K: Storable + Ord + Clone, V: Storable> Node<K, V> {
     /// Creates a new v2 node at the given address.
-    pub fn new_v2(address: Address, node_type: NodeType, page_size: PageSize) -> Node<K> {
+    pub fn new_v2(address: Address, node_type: NodeType, page_size: PageSize) -> Node<K, V> {
         assert!(page_size.get() >= MINIMUM_PAGE_SIZE);
 
         Node {
@@ -102,11 +104,12 @@ impl<K: Storable + Ord + Clone> Node<K> {
             entries_pos: vec![],
             children: vec![],
             overflows: Vec::with_capacity(0),
+            value: PhantomData,
         }
     }
 
     /// Loads a v2 node from memory at the given address.
-    pub(super) fn load_v2<M: Memory, V: Storable>(
+    pub(super) fn load_v2<M: Memory>(
         address: Address,
         page_size: PageSize,
         header: NodeHeader,
@@ -241,6 +244,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
             node_type,
             version: Version::V2(page_size),
             overflows,
+            value: PhantomData,
         }
     }
 

@@ -40,11 +40,13 @@
 //! Child(k + 1) address    ↕ 8 bytes
 //! ----------------------------------------
 //! ```
+use std::marker::PhantomData;
+
 use super::*;
 
-impl<K: Storable + Ord + Clone> Node<K> {
+impl<K: Storable + Ord + Clone, V: Storable> Node<K, V> {
     /// Creates a new v1 node at the given address.
-    pub fn new_v1(address: Address, node_type: NodeType, page_size: DerivedPageSize) -> Node<K> {
+    pub fn new_v1(address: Address, node_type: NodeType, page_size: DerivedPageSize) -> Node<K, V> {
         Node {
             address,
             node_type,
@@ -53,6 +55,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
             children: vec![],
             version: Version::V1(page_size),
             overflows: Vec::with_capacity(0),
+            value: PhantomData,
         }
     }
 
@@ -113,6 +116,7 @@ impl<K: Storable + Ord + Clone> Node<K> {
                 max_value_size,
             }),
             overflows: Vec::with_capacity(0),
+            value: PhantomData,
         }
     }
 
